@@ -5,20 +5,18 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>手書きメモ→Word変換</title>
 
-<!-- ========== ライブラリ ========== -->
+<!-- ===== ライブラリ ===== -->
 <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" defer></script>
 
-<!-- ========== スタイル ========== -->
+<!-- ===== スタイル ===== -->
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Segoe UI",Roboto}
 body{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:25px}
 .container{max-width:1080px;margin:auto;background:rgba(255,255,255,.95);border-radius:18px;box-shadow:0 18px 38px rgba(0,0,0,.1);padding:40px}
 h1{text-align:center;font-size:2.4em;font-weight:700;background:linear-gradient(45deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
 .subtitle{text-align:center;color:#555;margin-bottom:32px}
-.lang-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:20px;gap:10px;font-size:.9em;color:#444}
-.lang-wrap select{padding:6px 12px;border:1px solid #bbb;border-radius:8px;font-size:.9em}
 .upload-zone{border:2px dashed #bbb;border-radius:15px;padding:38px;text-align:center;transition:.3s;position:relative;margin-bottom:28px}
 .upload-zone:hover{border-color:#667eea;background:#f0f4ff}
 .upload-btn{background:linear-gradient(45deg,#667eea,#764ba2);color:#fff;border:none;border-radius:24px;padding:15px 36px;cursor:pointer;font-size:1.07em;box-shadow:0 4px 15px rgba(102,126,234,.3);transition:.3s}
@@ -44,17 +42,7 @@ textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;pad
   <h1>✍️ 手書きメモ → Word変換</h1>
   <p class="subtitle">写真に撮ったメモを編集可能な Word 文書へ</p>
 
-  <!-- ========= 言語選択 ========= -->
-  <div class="lang-wrap">
-    <span>OCR 言語：</span>
-    <select id="langSelect">
-      <option value="jpn" selected>日本語（jpn）</option>
-      <option value="eng">英語（eng）</option>
-    </select>
-    <small>※日本語モデル初回ロードに時間がかかります</small>
-  </div>
-
-  <!-- ========= アップロード ========= -->
+  <!-- ===== アップロード ===== -->
   <div class="upload-zone">
     <div style="font-size:4em;margin-bottom:12px">📸</div>
     <input type="file" id="imageInput" accept="image/*" class="file-input">
@@ -62,12 +50,12 @@ textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;pad
     <p style="margin-top:14px;color:#666">JPG / PNG / WebP  |  最大5&nbsp;MB</p>
   </div>
 
-  <!-- ========= ローディング ========= -->
+  <!-- ===== ローディング ===== -->
   <div id="loading" class="loading">
     <div class="spinner"></div><p id="loadingMsg">画像を解析中...</p>
   </div>
 
-  <!-- ========= プレビュー ========= -->
+  <!-- ===== プレビュー ===== -->
   <section id="previewSection" style="display:none">
     <div class="preview-wrap">
       <div class="panel"><h3>📷 アップロード画像</h3><img id="previewImage"></div>
@@ -81,144 +69,95 @@ textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;pad
   </section>
 </div>
 
-<!-- ========= トースト ========= -->
 <div id="toast" class="toast"></div>
 
-<!-- ========= ロジック ========= -->
+<!-- ===== ロジック ===== -->
 <script>
-/* ----- DOM ----- */
+/*** 設定 ***/
+const OCR_API_KEY = 'K83943708888957';  /* ← ここを差し替え済み */
+
+/*** DOM ***/
 const imgInput   = document.getElementById('imageInput');
 const previewIm  = document.getElementById('previewImage');
 const previewSec = document.getElementById('previewSection');
 const textArea   = document.getElementById('textOutput');
 const loadingBox = document.getElementById('loading');
 const loadingMsg = document.getElementById('loadingMsg');
-const langSel    = document.getElementById('langSelect');
 const toastBox   = document.getElementById('toast');
 
-/* ----- 状態 ----- */
-let currentFile   = null;
-let docxReady     = !!window.docx;
-let toastTimer    = null;
+/*** 状態 ***/
+let currentFile = null;
+let docxReady   = !!window.docx;
+let timer       = null;
 
-/* ----- トースト ----- */
-function toast(msg,dur=3000){
-  toastBox.textContent = msg;
+/*** トースト ***/
+function toast(msg,d=3000){
+  toastBox.textContent=msg;
   toastBox.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>toastBox.classList.remove('show'),dur);
+  clearTimeout(timer);
+  timer=setTimeout(()=>toastBox.classList.remove('show'),d);
 }
 
-/* ----- 画像選択 ----- */
+/*** 画像選択 ***/
 imgInput.addEventListener('change',e=>{
-  const f = e.target.files[0];
+  const f=e.target.files[0];
   if(!f) return;
-  if(f.size > 5*1024*1024){toast('5 MB 以内の画像を選択してください');return;}
-  currentFile       = f;
-  previewIm.src     = URL.createObjectURL(f);
-  previewSec.style.display = 'block';
-  textArea.value    = '';
+  if(f.size>5*1024*1024){toast('5 MB 以内の画像を選択してください');return;}
+  currentFile=f;
+  previewIm.src=URL.createObjectURL(f);
+  previewSec.style.display='block';
+  textArea.value='';
 });
 
-/* ========= 前処理 =========
-   元画像 → A: 生, B: 明度+コントラストUP, C: グレースケール+二値化
-   それぞれ 2 倍にリスケールして返す
-*/
-function generateVariants(file){
-  return new Promise(res=>{
-    const img = new Image();
-    img.onload = ()=>{
-      const scale = Math.max(1, 1000/Math.max(img.naturalWidth,img.naturalHeight));
-      const W = Math.round(img.naturalWidth*scale*2); // 2 倍太らせる
-      const H = Math.round(img.naturalHeight*scale*2);
-      const cvs = document.createElement('canvas');
-      cvs.width=W; cvs.height=H;
-      const ctx = cvs.getContext('2d');
+/*** --- クラウド OCR --- ***/
+async function remoteOCR(file, lang='jpn'){
+  const fd=new FormData();
+  fd.append('apikey', OCR_API_KEY);
+  fd.append('language', lang);
+  fd.append('isOverlayRequired','false');
+  fd.append('OCREngine','2');
+  fd.append('file', file);
 
-      // A: 生
-      ctx.drawImage(img,0,0,W,H);
-      const a = ctx.getImageData(0,0,W,H);
-      // B: 明度+コントラスト
-      ctx.filter='brightness(1.15) contrast(1.35)';
-      ctx.drawImage(img,0,0,W,H);
-      const b = ctx.getImageData(0,0,W,H);
-      // C: グレースケール → Otsuライクな固定閾値(180)
-      ctx.drawImage(img,0,0,W,H);
-      const c = ctx.getImageData(0,0,W,H);
-      const d = c.data;
-      for(let i=0;i<d.length;i+=4){
-        const g = d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
-        const v = g>180?255:0;
-        d[i]=d[i+1]=d[i+2]=v;
-      }
-      ctx.putImageData(c,0,0);
-
-      Promise.all([a,b,c].map(id=>{
-        const off=document.createElement('canvas');
-        off.width=W;off.height=H;
-        off.getContext('2d').putImageData(id,0,0);
-        return new Promise(r=>off.toBlob(r,'image/png'));
-      })).then(res);
-    };
-    img.src = URL.createObjectURL(file);
-  });
+  const res = await fetch('https://api.ocr.space/parse/image', {method:'POST',body:fd});
+  const js = await res.json();
+  if(js?.IsErroredOnProcessing) throw new Error(js.ErrorMessage?.[0]||'remote error');
+  return js?.ParsedResults?.[0]?.ParsedText || '';
 }
 
-/* ========= OCR ========= */
+/*** --- フォールバック：オフライン Tesseract --- ***/
+async function localOCR(file){
+  const {data:{text}} = await Tesseract.recognize(file,'jpn',{
+    logger:m=>{if(m.status==='recognizing text'){loadingMsg.innerHTML=`オフラインOCR ${Math.round(m.progress*100)}%`;}},
+    tessedit_pageseg_mode:6
+  });
+  return text;
+}
+
+/*** メイン処理 ***/
 async function processImage(){
-  if(!currentFile){toast('先に画像を選択してください');return;}
+  if(!currentFile){toast('画像を選択してください');return;}
 
   loadingBox.style.display='block';
-  loadingMsg.textContent='前処理中...';
+  loadingMsg.textContent='クラウドOCR 実行中...';
 
-  const blobs = await generateVariants(currentFile);
-  const lang  = langSel.value;
-  const psms  = [6,5,7,3];               // 複数行, 単一列, 単一行, 自動
-
-  async function recog(blob,psm,langCode){
-    return Tesseract.recognize(blob, langCode, {
-      logger: m=>{
-        if(m.status==='recognizing text'){
-          loadingMsg.innerHTML=`${psm}番モード ${Math.round(m.progress*100)}%`;
-        }
-      },
-      tessedit_pageseg_mode: psm
-    });
-  }
-
-  let finalText='';
-  outer: for(const blob of blobs){
-    for(const psm of psms){
-      loadingMsg.textContent=`OCR (${lang}) PSM=${psm}...`;
-      try{
-        const {data:{text}} = await recog(blob,psm,lang);
-        if(text.trim().length>=10){finalText=text;break outer;}
-      }catch{/* 無視して次へ */}
+  try{
+    let txt = await remoteOCR(currentFile,'jpn');
+    if(!txt.trim()) txt = await remoteOCR(currentFile,'eng');
+    if(!txt.trim()){
+      toast('クラウドで認識できず → オフラインに切替',4000);
+      txt = await localOCR(currentFile);
     }
-  }
-
-  if(!finalText && lang!=='eng'){
-    toast('日本語失敗 → 英語で再試行',4000);
-    for(const blob of blobs){
-      for(const psm of psms){
-        try{
-          const {data:{text}} = await recog(blob,psm,'eng');
-          if(text.trim().length>=10){finalText=text;break outer;}
-        }catch{}
-      }
-    }
-  }
-
-  loadingBox.style.display='none';
-
-  if(finalText){
-    textArea.value=finalText.trim();
-  }else{
-    toast('どうしても文字を認識できませんでした',4000);
+    textArea.value = txt.trim();
+    if(!txt.trim()) toast('文字を認識できませんでした',4000);
+  }catch(err){
+    console.error(err);
+    toast('OCR エラー：'+err.message);
+  }finally{
+    loadingBox.style.display='none';
   }
 }
 
-/* ========= Word ========= */
+/*** Word 生成 ***/
 async function ensureDocx(){
   if(docxReady) return;
   await new Promise((ok,ng)=>{
@@ -233,31 +172,23 @@ async function downloadWord(){
   const txt=textArea.value.trim();
   if(!txt){toast('テキストがありません');return;}
   await ensureDocx();
-  if(window.docx){
-    try{
-      const {Document,Packer,Paragraph,TextRun}=docx;
-      const paras=txt.split(/\r?\n/).map(l=>new Paragraph({children:[new TextRun(l)]}));
-      const doc=new Document({sections:[{children:paras}]});
-      const blob=await Packer.toBlob(doc);
-      const href=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=href; a.download=`handwriting_${Date.now()}.docx`;
-      document.body.appendChild(a);a.click();a.remove();
-      URL.revokeObjectURL(href);
-      return;
-    }catch(e){console.error(e);}
+  try{
+    const {Document,Packer,Paragraph,TextRun}=docx;
+    const paras=txt.split(/\r?\n/).map(l=>new Paragraph({children:[new TextRun(l)]}));
+    const doc=new Document({sections:[{children:paras}]});
+    const blob=await Packer.toBlob(doc);
+    const link=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=link;a.download=`handwriting_${Date.now()}.docx`;
+    document.body.appendChild(a);a.click();a.remove();
+    URL.revokeObjectURL(link);
+  }catch(e){
+    console.error(e);
+    toast('docx 生成に失敗しました');
   }
-  toast('docx 読み込み失敗 → RTF で保存',4000);
-  const rtf=`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\f0 ${txt.replace(/\n/g,'\\par ')}}`;
-  const blob=new Blob([rtf],{type:'application/rtf'});
-  const link=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=link;a.download=`handwriting_${Date.now()}.rtf`;
-  document.body.appendChild(a);a.click();a.remove();
-  URL.revokeObjectURL(link);
 }
 
-/* ========= Reset ========= */
+/*** Reset ***/
 function resetAll(){
   currentFile=null;
   imgInput.value='';

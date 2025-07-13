@@ -1,156 +1,223 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
+<!DOCTYPE html><html lang="ja"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>手書きメモ → Word変換</title>
+<title>手書きメモ→Word変換</title>
 
+<!-- ========== 必要ライブラリ（ロード失敗時は後で動的リトライ） ========== -->
 <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.4.0/docx.umd.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" defer></script>
 
-<!-- ★ 最低限のスタイルだけ残して短縮版 ★ -->
+<!-- ========== ざっくりデザイン ========== -->
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:'Hiragino Kaku Gothic ProN',sans-serif}
-body{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:20px;color:#2c3e50}
-.container{max-width:1100px;margin:0 auto;background:#fff;background:rgba(255,255,255,.95);backdrop-filter:blur(10px);border-radius:20px;padding:40px;box-shadow:0 20px 40px rgba(0,0,0,.1)}
-h1{text-align:center;font-size:2.4em;font-weight:700;background:linear-gradient(45deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
-.subtitle{text-align:center;margin-bottom:35px;color:#555}
-
-.upload-section{border:2px dashed #bbb;border-radius:15px;padding:40px 20px;text-align:center;margin-bottom:30px;transition:.3s}
-.upload-section:hover{border-color:#667eea;background:#f0f4ff}
-.file-input{position:absolute;width:100%;height:100%;opacity:0;cursor:pointer;top:0;left:0}
-.upload-button{background:linear-gradient(45deg,#667eea,#764ba2);color:#fff;border:none;padding:15px 35px;border-radius:25px;font-size:1.1em;cursor:pointer;box-shadow:0 4px 15px rgba(102,126,234,.3);transition:.3s}
-.upload-button:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(102,126,234,.4)}
-.upload-text{margin-top:15px;color:#666}
-
-.preview-container{display:flex;gap:20px;flex-wrap:wrap}
-.image-preview,.text-preview{flex:1 1 320px;background:#fff;border-radius:10px;padding:20px;box-shadow:0 5px 15px rgba(0,0,0,.1)}
-.image-preview img{width:100%;border-radius:8px}
-.text-output{width:100%;min-height:200px;border:1px solid #ddd;border-radius:8px;padding:15px;resize:vertical}
-.controls{display:flex;gap:15px;justify-content:center;flex-wrap:wrap;margin-top:20px}
-.btn{padding:12px 25px;border:none;border-radius:25px;font-size:1em;cursor:pointer;font-weight:600;transition:.3s}
-.btn-primary{background:linear-gradient(45deg,#667eea,#764ba2);color:#fff}
-.btn-success{background:#28a745;color:#fff}.btn-secondary{background:#6c757d;color:#fff}
-.btn:hover{transform:translateY(-2px)}
-.processing-indicator{display:none;text-align:center;margin:20px 0;color:#667eea}
-.spinner{border:4px solid #f3f3f3;border-top:4px solid #667eea;border-radius:50%;width:38px;height:38px;animation:spin 1s linear infinite;margin:0 auto 10px}@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Segoe UI",Roboto}
+body{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:25px}
+.container{max-width:1080px;margin:auto;background:rgba(255,255,255,.95);border-radius:18px;box-shadow:0 18px 38px rgba(0,0,0,.1);padding:40px}
+h1{text-align:center;font-size:2.4em;font-weight:700;background:linear-gradient(45deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+.subtitle{text-align:center;color:#555;margin-bottom:32px}
+.upload-zone{border:2px dashed #bbb;border-radius:15px;padding:38px;text-align:center;transition:.3s;position:relative;margin-bottom:28px}
+.upload-zone:hover{border-color:#667eea;background:#f0f4ff}
+.upload-btn{background:linear-gradient(45deg,#667eea,#764ba2);color:#fff;border:none;border-radius:24px;padding:15px 36px;cursor:pointer;font-size:1.07em;box-shadow:0 4px 15px rgba(102,126,234,.3);transition:.3s}
+.upload-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(102,126,234,.4)}
+.file-input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.preview-wrap{display:flex;gap:22px;flex-wrap:wrap}
+.panel{flex:1 1 320px;background:#fff;border-radius:10px;padding:20px;box-shadow:0 5px 14px rgba(0,0,0,.08)}
+.panel img{width:100%;border-radius:8px}
+textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;padding:14px;resize:vertical}
+.controls{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+.btn{border:none;border-radius:24px;padding:12px 28px;font-size:1em;font-weight:600;cursor:pointer;transition:.3s;color:#fff}
+.btn-primary{background:linear-gradient(45deg,#667eea,#764ba2)}
+.btn-success{background:#28a745}.btn-secondary{background:#6c757d}
+.btn:hover{transform:translateY(-2px);opacity:.92}
+.loading{display:none;text-align:center;margin:24px 0;color:#667eea}
+.spinner{border:4px solid #f3f3f3;border-top:4px solid #667eea;border-radius:50%;width:42px;height:42px;animation:spin 1s linear infinite;margin:0 auto 10px}
+@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 20px;border-radius:8px;font-size:.9em;opacity:0;transition:.4s}
+.toast.show{opacity:.9}
 </style>
-</head>
-
-<body>
+</head><body>
 <div class="container">
-
   <h1>✍️ 手書きメモ → Word変換</h1>
-  <p class="subtitle">写真に撮った手書きのメモを編集可能な Word 文書に変換</p>
+  <p class="subtitle">写真に撮ったメモを編集可能な Word 文書へ</p>
 
-  <!-- アップロード -->
-  <div class="upload-section">
-    <div style="position:relative;display:inline-block">
-      <span style="font-size:4em">📸</span><br>
-      <input type="file" class="file-input" id="imageInput" accept="image/*">
-      <button class="upload-button" onclick="imageInput.click()">画像を選択</button>
-    </div>
-    <p class="upload-text">JPG, PNG, WebP | 最大 5 MB</p>
+  <!-- ================== アップロード UI ================== -->
+  <div class="upload-zone">
+    <div style="font-size:4em;margin-bottom:12px">📸</div>
+    <input type="file" id="imageInput" accept="image/*" class="file-input">
+    <button class="upload-btn" onclick="imageInput.click()">画像を選択</button>
+    <p style="margin-top:14px;color:#666">JPG / PNG / WebP  |  最大5 MB</p>
   </div>
 
-  <!-- インジケータ -->
-  <div class="processing-indicator" id="processingIndicator">
-    <div class="spinner"></div><p>画像を解析中...</p>
+  <!-- ================== 進行表示 ================== -->
+  <div id="loading" class="loading">
+    <div class="spinner"></div><p id="loadingMsg">画像を解析中...</p>
   </div>
 
-  <!-- プレビュー -->
+  <!-- ================== プレビュー ================== -->
   <section id="previewSection" style="display:none">
-    <div class="preview-container">
-      <div class="image-preview">
+    <div class="preview-wrap">
+      <div class="panel">
         <h3>📷 アップロード画像</h3>
-        <img id="previewImage" alt="プレビュー">
+        <img id="previewImage" alt="preview">
       </div>
-      <div class="text-preview">
+      <div class="panel">
         <h3>📝 抽出されたテキスト</h3>
-        <textarea id="textOutput" class="text-output" placeholder="ここに抽出されたテキストが表示されます"></textarea>
+        <textarea id="textOutput" placeholder="ここにOCR結果が表示"></textarea>
       </div>
     </div>
 
     <div class="controls">
       <button class="btn btn-primary" onclick="processImage()">🔍 テキスト抽出</button>
-      <button class="btn btn-success" onclick="downloadWord()">📄 Word をダウンロード</button>
-      <button class="btn btn-secondary" onclick="resetForm()">🔄 リセット</button>
+      <button class="btn btn-success" onclick="downloadWord()">📄 Word ダウンロード</button>
+      <button class="btn btn-secondary" onclick="resetAll()">🔄 リセット</button>
     </div>
   </section>
-
 </div>
 
-<!-- ===== ここからスクリプト ===== -->
-<script defer>
-let currentImage=null;
+<!-- ===== トースト通知 ===== -->
+<div id="toast" class="toast"></div>
 
-const imgInput   = document.getElementById('imageInput');
-const previewImg = document.getElementById('previewImage');
-const textArea   = document.getElementById('textOutput');
-const processing = document.getElementById('processingIndicator');
-const section    = document.getElementById('previewSection');
+<!-- ================== ロジック ================== -->
+<script>
+/* ---------- DOM 取得 ---------- */
+const imgInput  = document.getElementById('imageInput');
+const previewIm = document.getElementById('previewImage');
+const previewSt = document.getElementById('previewSection');
+const textArea  = document.getElementById('textOutput');
+const loading   = document.getElementById('loading');
+const loadingMsg= document.getElementById('loadingMsg');
+const toastBox  = document.getElementById('toast');
 
+/* ---------- 状態 ---------- */
+let currentFile  = null;
+let docxReady    = !!window.docx;   // 既に読めていれば true
+let loadingToast = null;
+
+/* ---------- トースト ---------- */
+function toast(msg,duration=3000){
+  toastBox.textContent=msg;
+  toastBox.classList.add('show');
+  clearTimeout(loadingToast);
+  loadingToast=setTimeout(()=>toastBox.classList.remove('show'),duration);
+}
+
+/* ---------- 画像選択 ---------- */
 imgInput.addEventListener('change',e=>{
   const f=e.target.files[0];
   if(!f) return;
-  if(f.size>5*1024*1024){alert('5 MB までです');return;}
-  currentImage=f;
-  previewImg.src=URL.createObjectURL(f);
-  section.style.display='block';
+  if(f.size>5*1024*1024){toast('5 MB 以内の画像を選択してください');return;}
+  currentFile=f;
+  previewIm.src=URL.createObjectURL(f);
+  previewSt.style.display='block';
   textArea.value='';
 });
 
+/* ---------- 簡易前処理 (グレースケール & 二値化) ---------- */
+function preprocess(file){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      const cvs=document.createElement('canvas');
+      cvs.width=img.naturalWidth; cvs.height=img.naturalHeight;
+      const ctx=cvs.getContext('2d');
+      ctx.drawImage(img,0,0);
+      const id=ctx.getImageData(0,0,cvs.width,cvs.height);
+      const data=id.data;
+      for(let i=0;i<data.length;i+=4){
+        const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114;
+        const bin=gray>200?255:0;        // threshold=200
+        data[i]=data[i+1]=data[i+2]=bin; // 白黒のみ
+      }
+      ctx.putImageData(id,0,0);
+      cvs.toBlob(b=>res(b),'image/png');
+    };
+    img.src=URL.createObjectURL(file);
+  });
+}
+
+/* ---------- OCR ---------- */
 async function processImage(){
-  if(!currentImage){alert('画像を選択してください');return;}
+  if(!currentFile){toast('先に画像を選択');return;}
 
-  processing.style.display='block';
-  processing.innerHTML='<div class="spinner"></div><p>初期化中...</p>';
+  loading.style.display='block';
+  loadingMsg.textContent='前処理中...';
 
-  const {data:{text}} = await Tesseract.recognize(
-    currentImage,
-    'jpn+eng',
-    {
-      corePath  :'https://unpkg.com/tesseract.js-core@4.0.2/tesseract-core.wasm.js',
-      workerPath:'https://unpkg.com/tesseract.js@4.1.1/dist/worker.min.js',
-      langPath  :'https://tessdata.projectnaptha.com/4.0.0',
-      logger:m=>{
-        if(m.status==='recognizing text'){
-          processing.innerHTML=`<div class="spinner"></div><p>テキスト認識中... ${Math.round(m.progress*100)}%</p>`;
+  const blob=await preprocess(currentFile);
+
+  loadingMsg.textContent='テキスト認識エンジン起動中...';
+
+  try{
+    const {data:{text}}=await Tesseract.recognize(
+      blob,'eng',      // ★英語専用モデルに絞る
+      { logger:m=>{
+          if(m.status==='recognizing text'){
+            loadingMsg.innerHTML=`認識中... ${Math.round(m.progress*100)}%`;
+          }
         }
       }
-    }
-  );
+    );
+    textArea.value=text.trim();
+    loading.style.display='none';
+    if(!text.trim()) toast('文字を認識できませんでした',4000);
+  }catch(err){
+    console.error(err);
+    toast('OCR でエラーが発生しました');
+    loading.style.display='none';
+  }
+}
 
-  textArea.value=text;
-  processing.style.display='none';
-  if(!text.trim()) alert('テキストを認識できませんでした');
+/* ---------- Word 生成 ---------- */
+async function ensureDocx(){
+  if(docxReady) return;
+  try{
+    await new Promise((ok,ng)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js';
+      s.onload=()=>{docxReady=true;ok();};
+      s.onerror=ng;
+      document.head.appendChild(s);
+    });
+  }catch{ /* ignore; fallback will trigger */ }
 }
 
 async function downloadWord(){
   const txt=textArea.value.trim();
-  if(!txt){alert('テキストがありません');return;}
+  if(!txt){toast('テキストがありません');return;}
 
-  const {Document,Packer,Paragraph,TextRun}=docx;
-  const paragraphs=txt.split(/\r?\n/).map(l=>new Paragraph({children:[new TextRun(l)]}));
-  const doc=new Document({sections:[{children:paragraphs}]});
-  const blob=await Packer.toBlob(doc);
+  await ensureDocx();
 
+  /* ---------- docx 成功パス ---------- */
+  if(window.docx){
+    try{
+      const {Document,Packer,Paragraph,TextRun}=docx;
+      const paras=txt.split(/\r?\n/).map(l=>new Paragraph({children:[new TextRun(l)]}));
+      const doc=new Document({sections:[{children:paras}]});
+      const blob=await Packer.toBlob(doc);
+      const href=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=href;
+      a.download=`handwriting_${Date.now()}.docx`;
+      document.body.appendChild(a);a.click();a.remove();
+      URL.revokeObjectURL(href);
+      return;
+    }catch(e){console.error(e);}
+  }
+
+  /* ---------- フォールバック：RTF ---------- */
+  toast('docx ライブラリ読み込み失敗 → RTF で保存します',4000);
+  const rtf=`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\f0 ${txt.replace(/\n/g,'\\par ')}}`;
+  const blob=new Blob([rtf],{type:'application/rtf'});
+  const link=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`手書きメモ_${new Date().toISOString().slice(0,10)}.docx`;
+  a.href=link;a.download=`handwriting_${Date.now()}.rtf`;
   document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(link);
 }
 
-function resetForm(){
-  currentImage=null;imgInput.value='';
-  section.style.display='none';processing.style.display='none';textArea.value='';
+/* ---------- Reset ---------- */
+function resetAll(){
+  currentFile=null;imgInput.value='';
+  previewSt.style.display='none';textArea.value='';
 }
-
-// グローバル公開（ボタンの onclick 用）
-window.processImage=processImage;
-window.downloadWord=downloadWord;
-window.resetForm=resetForm;
 </script>
-</body>
-</html>
+</body></html>

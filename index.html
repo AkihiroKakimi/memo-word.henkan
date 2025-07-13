@@ -51,7 +51,7 @@ textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;pad
       <option value="jpn" selected>日本語（jpn）</option>
       <option value="eng">英語（eng）</option>
     </select>
-    <small>※日本語モデルは初回ダウンロードに時間がかかります</small>
+    <small>※日本語モデル初回ロードに時間がかかります</small>
   </div>
 
   <!-- ========= アップロード ========= -->
@@ -70,16 +70,9 @@ textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;pad
   <!-- ========= プレビュー ========= -->
   <section id="previewSection" style="display:none">
     <div class="preview-wrap">
-      <div class="panel">
-        <h3>📷 アップロード画像</h3>
-        <img id="previewImage" alt="preview">
-      </div>
-      <div class="panel">
-        <h3>📝 抽出されたテキスト</h3>
-        <textarea id="textOutput" placeholder="ここにOCR結果が表示"></textarea>
-      </div>
+      <div class="panel"><h3>📷 アップロード画像</h3><img id="previewImage"></div>
+      <div class="panel"><h3>📝 抽出されたテキスト</h3><textarea id="textOutput" placeholder="ここにOCR結果が表示"></textarea></div>
     </div>
-
     <div class="controls">
       <button class="btn btn-primary" onclick="processImage()">🔍 テキスト抽出</button>
       <button class="btn btn-success" onclick="downloadWord()">📄 Word ダウンロード</button>
@@ -93,7 +86,7 @@ textarea{width:100%;min-height:240px;border:1px solid #ddd;border-radius:8px;pad
 
 <!-- ========= ロジック ========= -->
 <script>
-/* DOM */
+/* ----- DOM ----- */
 const imgInput   = document.getElementById('imageInput');
 const previewIm  = document.getElementById('previewImage');
 const previewSec = document.getElementById('previewSection');
@@ -103,150 +96,173 @@ const loadingMsg = document.getElementById('loadingMsg');
 const langSel    = document.getElementById('langSelect');
 const toastBox   = document.getElementById('toast');
 
-/* 状態 */
-let currentFile = null;
-let docxReady   = !!window.docx;
-let toastTimer  = null;
+/* ----- 状態 ----- */
+let currentFile   = null;
+let docxReady     = !!window.docx;
+let toastTimer    = null;
 
-/* トースト */
-function toast(msg,duration=3000){
+/* ----- トースト ----- */
+function toast(msg,dur=3000){
   toastBox.textContent = msg;
   toastBox.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>toastBox.classList.remove('show'),duration);
+  toastTimer = setTimeout(()=>toastBox.classList.remove('show'),dur);
 }
 
-/* 画像選択 */
+/* ----- 画像選択 ----- */
 imgInput.addEventListener('change',e=>{
   const f = e.target.files[0];
   if(!f) return;
   if(f.size > 5*1024*1024){toast('5 MB 以内の画像を選択してください');return;}
-  currentFile = f;
-  previewIm.src = URL.createObjectURL(f);
+  currentFile       = f;
+  previewIm.src     = URL.createObjectURL(f);
   previewSec.style.display = 'block';
-  textArea.value = '';
+  textArea.value    = '';
 });
 
-/* ===== 前処理：①解像度アップ & ②軽いコントラスト補正（無二値化） ===== */
-function preprocess(file){
+/* ========= 前処理 =========
+   元画像 → A: 生, B: 明度+コントラストUP, C: グレースケール+二値化
+   それぞれ 2 倍にリスケールして返す
+*/
+function generateVariants(file){
   return new Promise(res=>{
     const img = new Image();
     img.onload = ()=>{
-      /* ① 1000px 未満なら 2 倍拡大（線を太らせて OCR 精度アップ） */
-      const factor = Math.max(1, 1000 / Math.max(img.naturalWidth, img.naturalHeight));
-      const W = Math.round(img.naturalWidth  * factor);
-      const H = Math.round(img.naturalHeight * factor);
-
+      const scale = Math.max(1, 1000/Math.max(img.naturalWidth,img.naturalHeight));
+      const W = Math.round(img.naturalWidth*scale*2); // 2 倍太らせる
+      const H = Math.round(img.naturalHeight*scale*2);
       const cvs = document.createElement('canvas');
-      cvs.width = W; cvs.height = H;
+      cvs.width=W; cvs.height=H;
       const ctx = cvs.getContext('2d');
 
-      /* ② ほんの少しコントラストと明度を上げる */
-      ctx.filter = 'brightness(1.1) contrast(1.2)';
+      // A: 生
       ctx.drawImage(img,0,0,W,H);
+      const a = ctx.getImageData(0,0,W,H);
+      // B: 明度+コントラスト
+      ctx.filter='brightness(1.15) contrast(1.35)';
+      ctx.drawImage(img,0,0,W,H);
+      const b = ctx.getImageData(0,0,W,H);
+      // C: グレースケール → Otsuライクな固定閾値(180)
+      ctx.drawImage(img,0,0,W,H);
+      const c = ctx.getImageData(0,0,W,H);
+      const d = c.data;
+      for(let i=0;i<d.length;i+=4){
+        const g = d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+        const v = g>180?255:0;
+        d[i]=d[i+1]=d[i+2]=v;
+      }
+      ctx.putImageData(c,0,0);
 
-      cvs.toBlob(b=>res(b),'image/png');
+      Promise.all([a,b,c].map(id=>{
+        const off=document.createElement('canvas');
+        off.width=W;off.height=H;
+        off.getContext('2d').putImageData(id,0,0);
+        return new Promise(r=>off.toBlob(r,'image/png'));
+      })).then(res);
     };
     img.src = URL.createObjectURL(file);
   });
 }
 
-/* ===== OCR ===== */
+/* ========= OCR ========= */
 async function processImage(){
   if(!currentFile){toast('先に画像を選択してください');return;}
 
-  loadingBox.style.display = 'block';
-  loadingMsg.textContent   = '画像を前処理中...';
+  loadingBox.style.display='block';
+  loadingMsg.textContent='前処理中...';
 
-  const blob = await preprocess(currentFile);
-  const lang = langSel.value;
+  const blobs = await generateVariants(currentFile);
+  const lang  = langSel.value;
+  const psms  = [6,5,7,3];               // 複数行, 単一列, 単一行, 自動
 
-  async function recognize(langCode){
-    loadingMsg.textContent = `OCR (${langCode}) エンジンを起動中...`;
+  async function recog(blob,psm,langCode){
     return Tesseract.recognize(blob, langCode, {
       logger: m=>{
-        if(m.status === 'recognizing text'){
-          loadingMsg.innerHTML = `テキスト認識中... ${Math.round(m.progress*100)}%`;
+        if(m.status==='recognizing text'){
+          loadingMsg.innerHTML=`${psm}番モード ${Math.round(m.progress*100)}%`;
         }
       },
-      /* PSM=6: 均一なテキストブロック想定。手書きメモに最適 */
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0', // CDN の学習データ
-      tessedit_pageseg_mode: 6
+      tessedit_pageseg_mode: psm
     });
   }
 
-  try{
-    let result;
-    try{
-      result = await recognize(lang);
-    }catch(e){
-      if(lang!=='eng'){
-        toast('日本語モデルで失敗 → 英語モデルで再試行',4000);
-        result = await recognize('eng');
-      }else throw e;
+  let finalText='';
+  outer: for(const blob of blobs){
+    for(const psm of psms){
+      loadingMsg.textContent=`OCR (${lang}) PSM=${psm}...`;
+      try{
+        const {data:{text}} = await recog(blob,psm,lang);
+        if(text.trim().length>=10){finalText=text;break outer;}
+      }catch{/* 無視して次へ */}
     }
-    const txt = result.data.text.replace(/\s+$/,''); // 末尾改行削除
-    textArea.value = txt;
-    if(!txt) toast('文字を認識できませんでした',4000);
-  }catch(err){
-    console.error(err);
-    toast('OCR でエラーが発生しました');
-  }finally{
-    loadingBox.style.display = 'none';
+  }
+
+  if(!finalText && lang!=='eng'){
+    toast('日本語失敗 → 英語で再試行',4000);
+    for(const blob of blobs){
+      for(const psm of psms){
+        try{
+          const {data:{text}} = await recog(blob,psm,'eng');
+          if(text.trim().length>=10){finalText=text;break outer;}
+        }catch{}
+      }
+    }
+  }
+
+  loadingBox.style.display='none';
+
+  if(finalText){
+    textArea.value=finalText.trim();
+  }else{
+    toast('どうしても文字を認識できませんでした',4000);
   }
 }
 
-/* ===== Word ===== */
+/* ========= Word ========= */
 async function ensureDocx(){
   if(docxReady) return;
   await new Promise((ok,ng)=>{
-    const s = document.createElement('script');
-    s.src   = 'https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js';
-    s.onload= ()=>{docxReady=true;ok();};
-    s.onerror= ng;
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js';
+    s.onload=()=>{docxReady=true;ok();};
+    s.onerror=ng;
     document.head.appendChild(s);
   });
 }
-
 async function downloadWord(){
-  const txt = textArea.value.trim();
+  const txt=textArea.value.trim();
   if(!txt){toast('テキストがありません');return;}
-
   await ensureDocx();
-
   if(window.docx){
     try{
-      const {Document,Packer,Paragraph,TextRun} = docx;
-      const paras = txt.split(/\r?\n/).map(l=>new Paragraph({children:[new TextRun(l)]}));
-      const doc   = new Document({sections:[{children:paras}]});
-      const blob  = await Packer.toBlob(doc);
-      const href  = URL.createObjectURL(blob);
-      const a     = document.createElement('a');
-      a.href = href;
-      a.download = `handwriting_${Date.now()}.docx`;
+      const {Document,Packer,Paragraph,TextRun}=docx;
+      const paras=txt.split(/\r?\n/).map(l=>new Paragraph({children:[new TextRun(l)]}));
+      const doc=new Document({sections:[{children:paras}]});
+      const blob=await Packer.toBlob(doc);
+      const href=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=href; a.download=`handwriting_${Date.now()}.docx`;
       document.body.appendChild(a);a.click();a.remove();
       URL.revokeObjectURL(href);
       return;
     }catch(e){console.error(e);}
   }
-
-  /* フォールバック RTF */
-  toast('docx 読み込み失敗 → RTF で保存します',4000);
-  const rtf  = `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\f0 ${txt.replace(/\n/g,'\\par ')}}`;
-  const blob = new Blob([rtf],{type:'application/rtf'});
-  const link = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = link;a.download=`handwriting_${Date.now()}.rtf`;
+  toast('docx 読み込み失敗 → RTF で保存',4000);
+  const rtf=`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\f0 ${txt.replace(/\n/g,'\\par ')}}`;
+  const blob=new Blob([rtf],{type:'application/rtf'});
+  const link=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=link;a.download=`handwriting_${Date.now()}.rtf`;
   document.body.appendChild(a);a.click();a.remove();
   URL.revokeObjectURL(link);
 }
 
-/* ===== Reset ===== */
+/* ========= Reset ========= */
 function resetAll(){
-  currentFile = null;
-  imgInput.value = '';
-  previewSec.style.display = 'none';
-  textArea.value = '';
+  currentFile=null;
+  imgInput.value='';
+  previewSec.style.display='none';
+  textArea.value='';
 }
 </script>
 </body>
